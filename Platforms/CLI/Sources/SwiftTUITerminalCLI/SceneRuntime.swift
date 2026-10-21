@@ -257,6 +257,7 @@ final class SceneRuntime {
       // reset style, exit alternate screen.
       let resetSequence =
         "\u{1B}[?1003l\u{1B}[?1002l\u{1B}[?1016l\u{1B}[?1006l"  // disable mouse reporting
+        + "\u{1B}[?2031l"  // disable colour-scheme reports
         + "\u{1B}[?25h"  // show cursor
         + "\u{1B}[0m"  // reset style
         + "\u{1B}[?1049l"  // exit alternate screen

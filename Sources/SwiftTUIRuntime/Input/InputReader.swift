@@ -12,6 +12,7 @@ public final class InputReader: InputReading, TerminalInputReading,
   private let fileDescriptor: Int32
   private let mouseCoordinateMode: Mutex<MouseCoordinateMode>
   private let controlHandler: @Sendable (TerminalControlMessage) -> Void
+  private let reportHandler = TerminalInputReportHandler()
   private let controlChannelEnabled: Bool
   #if canImport(WASILibc) || canImport(ucrt)
     private let pollGate = TerminalInputPollGate()
@@ -105,6 +106,15 @@ public final class InputReader: InputReading, TerminalInputReading,
     }
   }
 
+  /// Receives the terminal reports the parser pulls out of the input (see
+  /// ``TerminalInputReport``), on the reader's queue, in arrival order.
+  /// `nil` drops them, as before.
+  package func setTerminalReportHandler(
+    _ handler: (@Sendable ([TerminalInputReport]) -> Void)?
+  ) {
+    reportHandler.handler.withLock { $0 = handler }
+  }
+
   /// Reads keyboard-only events.
   public func events() -> AsyncStream<KeyPress> {
     makeEventStream(
@@ -139,6 +149,7 @@ extension InputReader {
       let pollGate = self.pollGate
       let fileDescriptor = self.fileDescriptor
       let controlHandler = self.controlHandler
+      let reportHandler = self.reportHandler
       let controlChannelEnabled = self.controlChannelEnabled
       let mouseCoordinateMode = self.mouseCoordinateMode.withLock { $0 }
 
@@ -187,6 +198,7 @@ extension InputReader {
           case .bytes(let chunk):
             backoff.recordInput()
             let decoded = decoder.decode(chunk)
+            reportHandler.deliver(decoded.reports)
 
             for message in decoded.controlMessages {
               flushPendingMouseEvents()
@@ -233,6 +245,7 @@ extension InputReader {
       let pollGate = self.pollGate
       let fileDescriptor = self.fileDescriptor
       let controlHandler = self.controlHandler
+      let reportHandler = self.reportHandler
       let controlChannelEnabled = self.controlChannelEnabled
       let mouseCoordinateMode = self.mouseCoordinateMode.withLock { $0 }
 
@@ -267,6 +280,7 @@ extension InputReader {
           case .bytes(let chunk):
             backoff.recordInput()
             let decoded = decoder.decode(chunk)
+            reportHandler.deliver(decoded.reports)
 
             for message in decoded.controlMessages {
               controlHandler(message)
@@ -299,6 +313,7 @@ extension InputReader {
       let controller = self.windowsController
       let fileDescriptor = self.fileDescriptor
       let controlHandler = self.controlHandler
+      let reportHandler = self.reportHandler
       let controlChannelEnabled = self.controlChannelEnabled
       let mouseCoordinateMode = self.mouseCoordinateMode.withLock { $0 }
 
@@ -347,6 +362,7 @@ extension InputReader {
           case .bytes(let chunk):
             backoff.recordInput()
             let decoded = decoder.decode(chunk)
+            reportHandler.deliver(decoded.reports)
 
             for message in decoded.controlMessages {
               flushPendingMouseEvents()
@@ -393,6 +409,7 @@ extension InputReader {
       let controller = self.windowsController
       let fileDescriptor = self.fileDescriptor
       let controlHandler = self.controlHandler
+      let reportHandler = self.reportHandler
       let controlChannelEnabled = self.controlChannelEnabled
       let mouseCoordinateMode = self.mouseCoordinateMode.withLock { $0 }
 
@@ -427,6 +444,7 @@ extension InputReader {
           case .bytes(let chunk):
             backoff.recordInput()
             let decoded = decoder.decode(chunk)
+            reportHandler.deliver(decoded.reports)
 
             for message in decoded.controlMessages {
               controlHandler(message)
@@ -469,6 +487,7 @@ extension InputReader {
       makeManagedAsyncStream { [self] continuation in
         let fileDescriptor = self.fileDescriptor
         let controlHandler = self.controlHandler
+        let reportHandler = self.reportHandler
         let controlChannelEnabled = self.controlChannelEnabled
         let mouseCoordinateMode = self.mouseCoordinateMode.withLock { $0 }
         let queue = DispatchQueue(label: "InputReader.\(fileDescriptor)")
@@ -564,6 +583,7 @@ extension InputReader {
           )
           if !drainResult.bytes.isEmpty {
             let decoded = decoder.decode(drainResult.bytes)
+            reportHandler.deliver(decoded.reports)
             for message in decoded.controlMessages {
               flushPendingMouseEvents()
               controlHandler(message)
@@ -616,6 +636,7 @@ extension InputReader {
       makeManagedAsyncStream { [self] continuation in
         let fileDescriptor = self.fileDescriptor
         let controlHandler = self.controlHandler
+        let reportHandler = self.reportHandler
         let controlChannelEnabled = self.controlChannelEnabled
         let mouseCoordinateMode = self.mouseCoordinateMode.withLock { $0 }
         let queue = DispatchQueue(label: "InputReader.\(fileDescriptor)")
@@ -666,6 +687,7 @@ extension InputReader {
           )
           if !drainResult.bytes.isEmpty {
             let decoded = decoder.decode(drainResult.bytes)
+            reportHandler.deliver(decoded.reports)
             for message in decoded.controlMessages {
               controlHandler(message)
             }
@@ -755,5 +777,17 @@ extension InputReader: TerminalInputHandoffSuspending {
       }
       return try await body()
     #endif
+  }
+}
+
+/// Holds the report callback so each stream's read loop can capture it.
+private final class TerminalInputReportHandler: Sendable {
+  let handler = Mutex<(@Sendable ([TerminalInputReport]) -> Void)?>(nil)
+
+  func deliver(_ reports: [TerminalInputReport]) {
+    guard !reports.isEmpty, let handler = handler.withLock({ $0 }) else {
+      return
+    }
+    handler(reports)
   }
 }

@@ -172,6 +172,7 @@ package struct RuntimeRootEnvironmentSignature: Equatable, Sendable {
 package enum ForceRootEvaluationSource: String, Sendable, CaseIterable {
   case focusSyncRerender = "focus_sync_rerender"
   case terminalHandoff = "terminal_handoff"
+  case terminalAppearance = "terminal_appearance"
   case unattributed = "unattributed"
 }
 

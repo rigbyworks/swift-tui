@@ -17,6 +17,7 @@ import SwiftTUICore
     var mouseCoordinateMode: MouseCoordinateMode
     var pointerHoverEnabled: Bool
     var kittyKeyboardPushed: Bool
+    var colorSchemeReportsEnabled: Bool
   }
 
   struct TerminalRawModeSession {
@@ -27,6 +28,7 @@ import SwiftTUICore
     var mouseCoordinateMode = MouseCoordinateMode.cells
     var pointerHoverEnabled = false
     var kittyKeyboardPushed = false
+    var colorSchemeReportsEnabled = false
 
     mutating func activate(
       snapshot: TerminalModeSnapshot,
@@ -49,7 +51,8 @@ import SwiftTUICore
         savedSnapshot: savedSnapshot,
         mouseCoordinateMode: mouseCoordinateMode,
         pointerHoverEnabled: pointerHoverEnabled,
-        kittyKeyboardPushed: kittyKeyboardPushed
+        kittyKeyboardPushed: kittyKeyboardPushed,
+        colorSchemeReportsEnabled: colorSchemeReportsEnabled
       )
       reset()
       return restorePlan
@@ -87,6 +90,7 @@ import SwiftTUICore
       mouseCoordinateMode = .cells
       pointerHoverEnabled = false
       kittyKeyboardPushed = false
+      colorSchemeReportsEnabled = false
     }
 
     private func processExitResetBytes() -> [UInt8] {
@@ -94,7 +98,8 @@ import SwiftTUICore
         TerminalHostEscapeSequences.processExitReset(
           mouseCoordinateMode: mouseCoordinateMode,
           hoverEnabled: pointerHoverEnabled,
-          kittyKeyboardPushed: kittyKeyboardPushed
+          kittyKeyboardPushed: kittyKeyboardPushed,
+          colorSchemeReportsEnabled: colorSchemeReportsEnabled
         ).utf8
       )
     }

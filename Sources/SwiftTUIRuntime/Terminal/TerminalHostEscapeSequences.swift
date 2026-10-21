@@ -33,6 +33,12 @@ enum TerminalHostEscapeSequences {
   // shell (main screen) in enhanced mode on a compliant terminal.
   static let pushKittyKeyboardEnhancements = "\u{001B}[>1u"
   static let popKittyKeyboardEnhancements = "\u{001B}[<u"
+  // DEC mode 2031: while set, the terminal writes `CSI ? 997 ; 1|2 n` to the
+  // input whenever its colour scheme changes. Terminals without it ignore
+  // the unknown private mode.
+  static let enableColorSchemeReports = "\u{001B}[?2031h"
+  static let disableColorSchemeReports = "\u{001B}[?2031l"
+  static let primaryDeviceAttributesQuery = "\u{001B}[c"
 
   /// DECSTBM — set the vertical scroll region to rows `top...bottom`,
   /// 1-based inclusive. Side effect on a conforming terminal: the cursor
@@ -114,9 +120,13 @@ enum TerminalHostEscapeSequences {
   static func processExitReset(
     mouseCoordinateMode: MouseCoordinateMode,
     hoverEnabled: Bool,
-    kittyKeyboardPushed: Bool
+    kittyKeyboardPushed: Bool,
+    colorSchemeReportsEnabled: Bool = false
   ) -> String {
     var reset = ""
+    if colorSchemeReportsEnabled {
+      reset += disableColorSchemeReports
+    }
     if mouseCoordinateMode.reportsMouseInput {
       reset += disableMouseReporting(
         mouseCoordinateMode: mouseCoordinateMode,

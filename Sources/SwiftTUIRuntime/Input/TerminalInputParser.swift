@@ -11,11 +11,25 @@ private func matchesBracketedPasteStart(_ buffer: [UInt8]) -> Bool {
   return true
 }
 
+/// A report a terminal writes into the input stream, unasked or in reply to a
+/// query. The parser consumes it whole and never turns it into key or mouse
+/// events.
+package enum TerminalInputReport: Equatable, Sendable {
+  /// `CSI ? 997 ; 1 n` (dark) or `CSI ? 997 ; 2 n` (light). While DEC mode
+  /// 2031 is set, the terminal sends one whenever its colour scheme changes.
+  case colorSchemeChanged(isDark: Bool)
+  /// A reply to an OSC 10, 11 or 4 colour query.
+  case color(TerminalAppearanceQuery, Color)
+  /// A primary device attributes reply (`CSI ? … c`).
+  case primaryDeviceAttributes
+}
+
 /// Incrementally parses terminal bytes into normalized keyboard and mouse
 /// events.
 public struct TerminalInputParser: Sendable {
   private var bufferedBytes: [UInt8] = []
   private var mouseCoordinateMode: MouseCoordinateMode
+  private var reports: [TerminalInputReport] = []
 
   public init() {
     self.init(mouseCoordinateMode: .cells)
@@ -34,6 +48,7 @@ public struct TerminalInputParser: Sendable {
 
   /// Feeds raw bytes into the parser and returns any completed input events.
   public mutating func feed(_ bytes: [UInt8]) -> [InputEvent] {
+    reports.removeAll(keepingCapacity: true)
     bufferedBytes.append(contentsOf: bytes)
 
     var events: [InputEvent] = []
@@ -41,6 +56,13 @@ public struct TerminalInputParser: Sendable {
       events.append(event)
     }
     return events
+  }
+
+  /// The terminal reports the last ``feed(_:)`` consumed. Each feed discards
+  /// the reports the one before it left untaken.
+  package mutating func takeReports() -> [TerminalInputReport] {
+    defer { reports.removeAll(keepingCapacity: true) }
+    return reports
   }
 
   /// True when the buffer holds only a lone ESC that cannot yet be
@@ -447,8 +469,36 @@ extension TerminalInputParser {
       bufferedBytes.removeFirst()
       return parseNextEvent()
     }
+    if index > prefixLength, bufferedBytes[prefixLength] == 0x3F,
+      let report = privateCSIReport(
+        parameters: bufferedBytes[(prefixLength + 1)..<index],
+        finalByte: bufferedBytes[index]
+      )
+    {
+      reports.append(report)
+    }
     bufferedBytes.removeFirst(index + 1)
     return parseNextEvent()
+  }
+
+  private func privateCSIReport(
+    parameters: ArraySlice<UInt8>,
+    finalByte: UInt8
+  ) -> TerminalInputReport? {
+    switch finalByte {
+    case 0x6E:
+      if parameters.elementsEqual("997;1".utf8) {
+        return .colorSchemeChanged(isDark: true)
+      }
+      if parameters.elementsEqual("997;2".utf8) {
+        return .colorSchemeChanged(isDark: false)
+      }
+      return nil
+    case 0x63:
+      return .primaryDeviceAttributes
+    default:
+      return nil
+    }
   }
 
   private mutating func discardControlString(
@@ -462,6 +512,16 @@ extension TerminalInputParser {
       )
     else {
       return nil
+    }
+    // OSC colour replies are the one control string worth keeping: the
+    // appearance refresh asks for them mid-run, so they land here.
+    if terminatesWithBEL {
+      let terminatorLength = bufferedBytes[end - 1] == 0x5C ? 2 : 1
+      if let reply = TerminalAppearanceQuery.parseReply(
+        payload: bufferedBytes[prefixLength..<(end - terminatorLength)]
+      ) {
+        reports.append(.color(reply.query, reply.color))
+      }
     }
     bufferedBytes.removeFirst(end)
     return parseNextEvent()

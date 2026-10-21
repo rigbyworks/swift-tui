@@ -1,6 +1,7 @@
 struct TerminalInputDecodedBatch<Event: Sendable> {
   var controlMessages: [TerminalControlMessage]
   var events: [Event]
+  var reports: [TerminalInputReport] = []
 }
 
 struct TerminalInputEventDecoder<Event: Sendable> {
@@ -43,15 +44,19 @@ struct TerminalInputEventDecoder<Event: Sendable> {
   ) -> TerminalInputDecodedBatch<Event> {
     refreshMouseCoordinateMode()
     guard controlChannelEnabled else {
+      let events = transform(&parser, bytes)
       return TerminalInputDecodedBatch(
         controlMessages: [],
-        events: transform(&parser, bytes)
+        events: events,
+        reports: parser.takeReports()
       )
     }
     let filtered = controlParser.feed(bytes)
+    let events = transform(&parser, filtered.payload)
     return TerminalInputDecodedBatch(
       controlMessages: filtered.messages,
-      events: transform(&parser, filtered.payload)
+      events: events,
+      reports: parser.takeReports()
     )
   }
 

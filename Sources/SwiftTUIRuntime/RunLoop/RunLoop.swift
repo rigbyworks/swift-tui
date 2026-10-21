@@ -153,6 +153,11 @@ public final class RunLoop<State: Equatable & Sendable, Content: View>: Accessib
   /// and the latency columns stay empty.
   package let schedulerIntentTally: (any IntentRequestTallying)?
   package var previousPresentedRasterSurface: RasterSurface?
+  #if !canImport(WASILibc)
+    /// Follows colour-scheme reports for the running session. See
+    /// `startTerminalAppearanceRefresh()`.
+    var terminalAppearanceRefresher: TerminalAppearanceRefresher?
+  #endif
   /// Scroll state of the previously *presented* frame — the baseline the
   /// scroll-translation candidate (R2.2) diffs against. `nil` until a frame
   /// with scroll routes presents, and cleared again by a route-free frame.
@@ -447,11 +452,13 @@ public final class RunLoop<State: Equatable & Sendable, Content: View>: Accessib
       if terminalCommandSurface != nil {
         activateTerminalHandoffSession()
       }
+      startTerminalAppearanceRefresh()
     }
     defer {
       isSessionActive = false
       hasPendingProgrammaticTermination = false
       lifecycleCoordinator.shutdown()
+      stopTerminalAppearanceRefresh()
       deactivateTerminalHandoffSession()
       if usesRawTerminalMode {
         try? terminalCommandSurface?.disableRawMode()

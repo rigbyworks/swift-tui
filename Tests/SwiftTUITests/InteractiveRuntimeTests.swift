@@ -599,9 +599,11 @@ struct InteractiveRuntimeTests {
         // Kitty keyboard flags probe (piggybacking DA1). The mock answers
         // nothing, so no enhancement push follows.
         "\u{001B}[?u\u{001B}[c",
+        "\u{001B}[?2031h",
         "\u{001B}[2J",
         "\u{001B}[1;1H",
         "\u{001B}[?2004l",
+        "\u{001B}[?2031l",
         "\u{001B}[0m",
         "\u{001B}[?25h",
         "\u{001B}[?1049l",

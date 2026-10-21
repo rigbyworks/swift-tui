@@ -1,9 +1,47 @@
 import SwiftTUICore
 
-enum TerminalAppearanceQuery {
+package enum TerminalAppearanceQuery: Hashable, Sendable {
   case foreground
   case background
   case palette(index: Int)
+
+  /// The colours an appearance probe asks for, in the order it asks.
+  static let probed: [Self] =
+    [.foreground, .background] + [1, 2, 3, 4, 6, 8].map { .palette(index: $0) }
+
+  /// Parses the payload of an OSC 10, 11 or 4 colour reply (the bytes
+  /// between `ESC ]` and the BEL/ST terminator), such as
+  /// `11;rgb:2828/2a2a/3636`.
+  static func parseReply(
+    payload: some Collection<UInt8>
+  ) -> (query: Self, color: Color)? {
+    guard let text = strictUTF8String(from: Array(payload)) else {
+      return nil
+    }
+    let fields = text.split(separator: ";", maxSplits: 2, omittingEmptySubsequences: false)
+    let query: Self
+    let spec: Substring
+    switch (fields.first.map(String.init) ?? "", fields.count) {
+    case ("10", 2):
+      query = .foreground
+      spec = fields[1]
+    case ("11", 2):
+      query = .background
+      spec = fields[1]
+    case ("4", 3):
+      guard let index = Int(fields[1]), (0...255).contains(index) else {
+        return nil
+      }
+      query = .palette(index: index)
+      spec = fields[2]
+    default:
+      return nil
+    }
+    guard let color = query.parseColor(from: String(spec)) else {
+      return nil
+    }
+    return (query, color)
+  }
 
   var request: String {
     switch self {
@@ -83,27 +121,34 @@ extension TerminalAppearance {
     }
 
     do {
-      let foreground = try queryColor(.foreground) ?? heuristic.foregroundColor
-      let background = try queryColor(.background) ?? heuristic.backgroundColor
-      var palette = heuristic.palette
-
-      for index in [1, 2, 3, 4, 6, 8] {
-        if let color = try queryColor(.palette(index: index)) {
-          palette[index] = color
+      var replies: [TerminalAppearanceQuery: Color] = [:]
+      for query in TerminalAppearanceQuery.probed {
+        if let color = try queryColor(query) {
+          replies[query] = color
         }
       }
-
-      let tint = palette[4] ?? palette[6] ?? heuristic.tintColor
-      return .init(
-        foregroundColor: foreground,
-        backgroundColor: background,
-        tintColor: tint,
-        palette: palette,
-        source: .activeQuery
-      )
+      return heuristic.applying(replies)
     } catch {
       return heuristic
     }
+  }
+
+  /// Returns this appearance with the queried colours replaced. Colours the
+  /// terminal did not answer for keep their current values.
+  func applying(
+    _ replies: [TerminalAppearanceQuery: Color]
+  ) -> Self {
+    var palette = self.palette
+    for case (.palette(let index), let color) in replies {
+      palette[index] = color
+    }
+    return .init(
+      foregroundColor: replies[.foreground] ?? foregroundColor,
+      backgroundColor: replies[.background] ?? backgroundColor,
+      tintColor: palette[4] ?? palette[6] ?? tintColor,
+      palette: palette,
+      source: .activeQuery
+    )
   }
 
   private static func heuristicAppearance(

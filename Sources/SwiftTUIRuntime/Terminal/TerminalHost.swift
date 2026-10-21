@@ -225,6 +225,9 @@ public enum TerminalHostError: Error, Equatable, Sendable, CustomStringConvertib
           }
           let restorePlan = rawModeSession.deactivate()
           presentationSession.reset()
+          if restorePlan.colorSchemeReportsEnabled {
+            try? writeSynchronously(TerminalHostEscapeSequences.disableColorSchemeReports)
+          }
           if let savedSnapshot = restorePlan.savedSnapshot {
             try? controller.restore(
               savedSnapshot,
@@ -263,6 +266,12 @@ public enum TerminalHostError: Error, Equatable, Sendable, CustomStringConvertib
           outputFileDescriptor: outputFileDescriptor
         )
       }
+      // Last, after every probe above has finished reading the input, so a
+      // scheme report can only ever reach the live reader. The flag goes up
+      // before the write so a failed or partial write is still undone.
+      rawModeSession.colorSchemeReportsEnabled = true
+      refreshProcessExitCleanupRegistration()
+      try write(TerminalHostEscapeSequences.enableColorSchemeReports)
       shouldRestoreOnFailure = false
     }
 
@@ -313,6 +322,9 @@ public enum TerminalHostError: Error, Equatable, Sendable, CustomStringConvertib
         try writeSynchronously(TerminalHostEscapeSequences.popKittyKeyboardEnhancements)
       }
       try writeSynchronously(TerminalHostEscapeSequences.disableBracketedPaste)
+      if restorePlan.colorSchemeReportsEnabled {
+        try writeSynchronously(TerminalHostEscapeSequences.disableColorSchemeReports)
+      }
       try writeSynchronously(TerminalHostEscapeSequences.resetStyle)
       try writeSynchronously(TerminalHostEscapeSequences.showCursor)
       try writeSynchronously(TerminalHostEscapeSequences.exitAlternateScreen)
@@ -592,6 +604,39 @@ public enum TerminalHostError: Error, Equatable, Sendable, CustomStringConvertib
           return try self.performAppearanceQuery(query)
         }
       )
+    }
+
+    /// Asks the terminal for its colours again once the run loop owns the
+    /// input. Unlike the startup probe this only writes: the replies reach
+    /// the live reader, whose parser hands them back as reports for
+    /// ``applyAppearanceReplies(_:)``. Terminals answer in order, so the
+    /// trailing device attributes reply marks the end of the batch.
+    /// Returns `false`, writing nothing, outside raw mode.
+    package func requestAppearanceRefresh() throws -> Bool {
+      guard rawModeSession.isEnabled else {
+        return false
+      }
+      try write(
+        TerminalAppearanceQuery.probed.map(\.request).joined()
+          + TerminalHostEscapeSequences.primaryDeviceAttributesQuery
+      )
+      return true
+    }
+
+    /// Folds colour-query replies into the appearance. Returns whether the
+    /// appearance changed.
+    package func applyAppearanceReplies(
+      _ replies: [TerminalAppearanceQuery: Color]
+    ) -> Bool {
+      guard !replies.isEmpty else {
+        return false
+      }
+      let refreshed = appearance.applying(replies)
+      guard refreshed != appearance else {
+        return false
+      }
+      appearance = refreshed
+      return true
     }
 
     private func performAppearanceQuery(

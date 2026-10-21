@@ -8,6 +8,19 @@ may make source-breaking API adjustments. Pin with `.upToNextMinor`.
 
 ## [Unreleased]
 
+## [0.13.5-rigbyworks.1] - 2026-10-21
+
+Released from the rigbyworks fork for lazyxcode; not part of upstream SwiftTUI.
+
+### Added
+
+- Follow the terminal's light/dark changes while the app runs. Raw mode turns
+  on colour-scheme reports (DEC mode 2031), and every restore path turns them
+  off. Each `CSI ? 997 ; 1|2 n` report re-asks for OSC 10, 11 and 4, then
+  rebuilds the synthesized theme and redraws when the colours changed. Replies
+  arrive through the live input parser and never reach the app as key presses.
+  Reports close together share one re-probe.
+
 ## [0.13.5] - 2026-09-16
 
 ### Changed
