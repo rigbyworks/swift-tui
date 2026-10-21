@@ -238,6 +238,7 @@ public enum TerminalHostError: Error, Equatable, Sendable, CustomStringConvertib
         }
       }
 
+      let resumesSession = capabilityProbe.hasProbedAppearance
       refreshAppearanceIfNeeded()
       try write(TerminalHostEscapeSequences.enterAlternateScreen)
       TerminalScreenOwnership.acquire()
@@ -272,6 +273,12 @@ public enum TerminalHostError: Error, Equatable, Sendable, CustomStringConvertib
       rawModeSession.colorSchemeReportsEnabled = true
       refreshProcessExitCleanupRegistration()
       try write(TerminalHostEscapeSequences.enableColorSchemeReports)
+      // The colours were probed in an earlier session, and reports were off
+      // in between, for example while a handoff owned the terminal. Ask for
+      // the scheme so a change in that gap still prompts a re-probe.
+      if resumesSession {
+        try write(TerminalHostEscapeSequences.colorSchemeQuery)
+      }
       shouldRestoreOnFailure = false
     }
 
@@ -616,7 +623,9 @@ public enum TerminalHostError: Error, Equatable, Sendable, CustomStringConvertib
       guard rawModeSession.isEnabled else {
         return false
       }
-      try write(
+      // Queries leave the screen as it is, so the presented frame stays valid.
+      try drainPendingPresentation()
+      try writeSynchronously(
         TerminalAppearanceQuery.probed.map(\.request).joined()
           + TerminalHostEscapeSequences.primaryDeviceAttributesQuery
       )

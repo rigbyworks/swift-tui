@@ -14,6 +14,11 @@ import SwiftTUICore
   ///
   /// Reports that arrive while a refresh is waiting to start fold into it.
   /// Reports that arrive while one is in flight fold into a single follow-up.
+  ///
+  /// Replies carry nothing that ties them to a batch. When a batch times out,
+  /// its late replies may still be on the way, so no new batch starts until
+  /// that batch's device attributes reply arrives or a second timeout passes,
+  /// and colour replies in the meantime are dropped.
   @MainActor
   package final class TerminalAppearanceRefresher {
     private let host: TerminalHost
@@ -25,6 +30,8 @@ import SwiftTUICore
     private var replyDeadline: Task<Void, Never>?
     /// The replies collected so far; `nil` when no refresh is in flight.
     private var replies: [TerminalAppearanceQuery: Color]?
+    /// `true` while the late replies of a timed-out batch may still arrive.
+    private var drainsTimedOutBatch = false
     private var refreshesAfterReplies = false
 
     private var reader: InputReader?
@@ -69,6 +76,7 @@ import SwiftTUICore
       replyDeadline?.cancel()
       replyDeadline = nil
       replies = nil
+      drainsTimedOutBatch = false
       refreshesAfterReplies = false
     }
 
@@ -76,7 +84,7 @@ import SwiftTUICore
       for report in reports {
         switch report {
         case .colorSchemeChanged:
-          if replies != nil {
+          if replies != nil || drainsTimedOutBatch {
             refreshesAfterReplies = true
           } else {
             scheduleRefresh()
@@ -84,7 +92,11 @@ import SwiftTUICore
         case .color(let query, let color):
           replies?[query] = color
         case .primaryDeviceAttributes:
-          finishRefresh()
+          if drainsTimedOutBatch {
+            finishDraining()
+          } else {
+            finishRefresh()
+          }
         }
       }
     }
@@ -116,11 +128,11 @@ import SwiftTUICore
         guard !Task.isCancelled else {
           return
         }
-        self?.finishRefresh()
+        self?.finishRefresh(timedOut: true)
       }
     }
 
-    private func finishRefresh() {
+    private func finishRefresh(timedOut: Bool = false) {
       guard let replies else {
         return
       }
@@ -130,6 +142,32 @@ import SwiftTUICore
       if host.applyAppearanceReplies(replies) {
         onAppearanceChange()
       }
+      if timedOut {
+        drainsTimedOutBatch = true
+        let replyTimeout = replyTimeout
+        replyDeadline = Task { [weak self] in
+          try? await Task.sleep(for: replyTimeout)
+          guard !Task.isCancelled else {
+            return
+          }
+          self?.finishDraining()
+        }
+      } else {
+        refreshIfReported()
+      }
+    }
+
+    private func finishDraining() {
+      guard drainsTimedOutBatch else {
+        return
+      }
+      drainsTimedOutBatch = false
+      replyDeadline?.cancel()
+      replyDeadline = nil
+      refreshIfReported()
+    }
+
+    private func refreshIfReported() {
       if refreshesAfterReplies {
         refreshesAfterReplies = false
         scheduleRefresh()

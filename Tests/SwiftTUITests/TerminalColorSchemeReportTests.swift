@@ -123,16 +123,19 @@
       #expect(disable.upperBound <= exit.lowerBound)
     }
 
-    @Test("A terminal handoff clears 2031 and sets it again on the way back")
+    @Test("A terminal handoff clears 2031, then sets it again and asks for the scheme")
     func handoffRoundTrip() throws {
       let controller = ColorSchemeMockTerminalController()
       let host = makeHost(controller: controller)
       try host.enableRawMode()
+      #expect(!controller.writes.joined().contains("\u{001B}[?996n"))
       try host.disableRawMode()
       controller.clearWrites()
 
       try host.enableRawMode()
-      #expect(controller.writes.joined().contains("\u{001B}[?2031h"))
+      // The scheme may have changed while reports were off.
+      #expect(controller.writes.joined().hasSuffix("\u{001B}[?2031h\u{001B}[?996n"))
+      #expect(controller.backgroundQueryCount == 0)
       try host.disableRawMode()
       #expect(controller.writes.joined().hasSuffix("\u{001B}[?1049l"))
       #expect(controller.writes.joined().contains("\u{001B}[?2031l"))
@@ -252,6 +255,60 @@
       refresher.receive([.color(.background, Self.lightBackground)])
       try await waitUntil { changes.value == 1 }
       #expect(host.appearance.backgroundColor == Self.lightBackground)
+    }
+
+    @Test("Late replies from a timed-out batch never fill the next one")
+    func lateRepliesDoNotFillNextBatch() async throws {
+      let controller = ColorSchemeMockTerminalController()
+      let host = makeHost(controller: controller)
+      try host.enableRawMode()
+      controller.clearWrites()
+      let changes = LockedBox(0)
+      let refresher = TerminalAppearanceRefresher(
+        host: host, debounce: .zero, replyTimeout: .seconds(2)
+      ) {
+        changes.withLock { $0 += 1 }
+      }
+      defer { refresher.cancel() }
+      let staleBackground = Color(hexRGB: 0x101010)
+
+      // The batch times out with only part of its replies back.
+      refresher.receive([.colorSchemeChanged(isDark: false)])
+      try await waitUntil { controller.backgroundQueryCount == 1 }
+      refresher.receive([.color(.foreground, Color(hexRGB: 0x000000))])
+      try await waitUntil { changes.value == 1 }
+
+      // A report while its late replies may still come waits for them.
+      refresher.receive([.colorSchemeChanged(isDark: false)])
+      try await Task.sleep(for: .milliseconds(50))
+      #expect(controller.backgroundQueryCount == 1)
+
+      // The first batch's late replies land and close it out.
+      refresher.receive([.color(.background, staleBackground), .primaryDeviceAttributes])
+      try await waitUntil { controller.backgroundQueryCount == 2 }
+      #expect(changes.value == 1)
+
+      refresher.receive([.color(.background, Self.lightBackground), .primaryDeviceAttributes])
+      #expect(changes.value == 2)
+      #expect(host.appearance.backgroundColor == Self.lightBackground)
+    }
+
+    @Test("A timed-out batch whose replies never come stops blocking after a second timeout")
+    func drainingEndsAfterSecondTimeout() async throws {
+      let controller = ColorSchemeMockTerminalController()
+      let host = makeHost(controller: controller)
+      try host.enableRawMode()
+      controller.clearWrites()
+      let refresher = TerminalAppearanceRefresher(
+        host: host, debounce: .zero, replyTimeout: .milliseconds(200)
+      ) {}
+      defer { refresher.cancel() }
+
+      refresher.receive([.colorSchemeChanged(isDark: false)])
+      try await waitUntil { controller.backgroundQueryCount == 1 }
+      try await Task.sleep(for: .milliseconds(300))
+      refresher.receive([.colorSchemeChanged(isDark: true)])
+      try await waitUntil { controller.backgroundQueryCount == 2 }
     }
 
     @Test("Replies that match the current colours do not redraw")

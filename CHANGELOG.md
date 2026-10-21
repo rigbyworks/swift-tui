@@ -8,6 +8,19 @@ may make source-breaking API adjustments. Pin with `.upToNextMinor`.
 
 ## [Unreleased]
 
+## [0.13.5-rigbyworks.2] - 2026-10-21
+
+### Fixed
+
+- Keep the late replies of a timed-out colour re-probe out of the next one.
+  A new re-probe waits for the earlier batch's device attributes reply, or a
+  second timeout.
+- Ask for the colour scheme (`CSI ? 996 n`) when raw mode returns after a
+  terminal handoff, so a change while reports were off still updates the
+  colours.
+- Stop repainting the whole screen for every report: the colour queries no
+  longer discard the presented frame.
+
 ## [0.13.5-rigbyworks.1] - 2026-10-21
 
 Released from the rigbyworks fork for lazyxcode; not part of upstream SwiftTUI.

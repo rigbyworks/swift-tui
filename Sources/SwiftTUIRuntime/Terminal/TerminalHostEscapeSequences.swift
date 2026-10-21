@@ -38,6 +38,8 @@ enum TerminalHostEscapeSequences {
   // the unknown private mode.
   static let enableColorSchemeReports = "\u{001B}[?2031h"
   static let disableColorSchemeReports = "\u{001B}[?2031l"
+  // Asks for the current scheme; the answer is the same report.
+  static let colorSchemeQuery = "\u{001B}[?996n"
   static let primaryDeviceAttributesQuery = "\u{001B}[c"
 
   /// DECSTBM — set the vertical scroll region to rows `top...bottom`,
